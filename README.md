@@ -30,8 +30,8 @@ $api = new RestApi(array(
 
 ### Define your routes and callbacks (inline in this case)
 ```php
-$api->get('/', function($api){
-    return "PHP REST API works!";
+$api->get('/', function(){
+    return "It works!";
 });
 ```
 
