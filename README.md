@@ -22,6 +22,7 @@ include_once('lib/lib.php-rest-api.php');
 ```
 
 ### Create the API instance
+Override config parameters by passing them as array
 ```php
 $api = new RestApi(array(
     'return_server_errors' => true,
