@@ -1,17 +1,7 @@
 <?php
 
-function parse_multiple_params($api){
-
-    $matches = $api->getMatches();
-
-    return array(
-        'count' => sizeof($matches),
-        'matches' => $matches
-    );
-
-}
-
 function get_all(){
+
     return array(
         array(
             'id' => 1,

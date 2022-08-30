@@ -1,34 +1,63 @@
 <?php
 
-/* Including the library */
+/**
+ * 
+ * This is an example use of PHP Rest API Class.
+ * @author: Lorenzo Conti
+ * 
+ */
+
+/* Class inclusion */
+
 include_once('lib/lib.php-rest-api.php');
 
-/* Init REST API */
+/* Init API instance */
+
 $api = new RestApi(array(
+
     'return_server_errors' => true,
+
 ));
 
-/* Define route with inline response */
+/* Define base route with inline response */
+
 $api->get('/', function($api){
-    return "PHP REST API works!";
+
+    return "It works!";
+
 });
 
-/* List all routes */
+/* This route will return all defined routes */
+
 $api->get('/routes', function($api){
+
     return $api->getRoutes();
+
 });
 
-/* Routing and pass regex parameters (eg. /test/123456) */
-$api->get('/test/([0-9]+)/([0-9]+)', 'parse_multiple_params');
+/* This returns an array with passed parameters matching this regex pattern */
 
-/* Real world example */
+$api->get('/test/([0-9]+)/([0-9]+)', function ($api){
+
+    $matches = $api->getMatches();
+    return $matches;
+
+});
+
+/* Real world example with multiple request methods and external callbacks -> /routes/route.test.php */
+
 $api->get('/test/?', 'get_all');
 $api->get('/test/([0-9]+)', 'get');
 $api->post('/test/([0-9]+)', 'insert');
 $api->put('/test/([0-9]+)', 'update');
 $api->delete('/test/([0-9]+)', 'delete');
 
-/* login example and JWT token-> /routes/route.login.php */
+/* Search route -> /routes/route.search.php */
+
+$api->get('/search/([\w\W]+)', 'search');
+
+/* login example and JWT token -> /routes/route.login.php */
+
 $api->post('/login', 'login');
 
 /* Parse the request */
