@@ -32,27 +32,35 @@ $api = new RestApi(array(
 ### Define your routes and callbacks (inline in this case)
 ```php
 $api->get('/', function(){
+
     return "It works!";
+    
 });
 ```
 
 ### Example: List all routes
-**$api** is always passed to routing functions to make public methods always available.
+**$api** is passed to route callback functions to make public methods always available.
 ```php
 $api->get('/routes', function($api){
+
     return $api->getRoutes();
+    
 });
 ```
 
-### Example: Routing and pass regex parameters (eg. /test/123456)
-When **/test** endpoint URL is called, the api manager looks for **routes/route.test.php** and auto-includes it if exists, this way it doesn't have to be included manually.
+### Example: Routing with regex matching
 ```php
-$api->get('/test/([0-9]+)/([0-9]+)', 'parse_multiple_params');
-```
-Defined URLs are REGEX patterns in which multiple matching parameters can be specified, to see how they are parsed please check test route file.
+$api->get('/test/([0-9]+)/([0-9]+)', function ($api){
 
-### More examples:
-Multiple request methods, all callback functions are defined in **routes/route.test.php**
+    $matches = $api->getMatches();
+    return $matches;
+
+});
+```
+URLs are REGEX patterns in which multiple matching parameters can be specified. In this example, when endpoint url /test/**123**/**456** is called, this function will return [123, 456].
+
+### More examples with callback:
+This example shows how multiple HTTP methods can be used and how to define respective callback functions, if route file **routes/route.test.php** is present, it will be included automatically.
 ```php
 $api->get('/test/?', 'get_all');
 $api->get('/test/([0-9]+)', 'get');
