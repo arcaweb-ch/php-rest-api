@@ -25,32 +25,34 @@ include_once('lib/lib.php-rest-api.php');
 Override config parameters by passing them as array
 ```php
 $api = new RestApi(array(
-
     'return_server_errors' => true,
-    
 ));
 ```
 
-### Define your routes and callbacks (inline in this case)
+### Define your routes
 ```php
 $api->get('/', function(){
-
     return "It works!";
-    
 });
 ```
 
-### Example: List all routes
+### Use callback functions
+```php
+function my_callback(){
+    return 'Awesome!';
+}
+$api->get('/awesome', 'my_callback');
+```
+
+### Example: Use API methods
 **$api** is passed to route callback functions to make public methods always available.
 ```php
 $api->get('/routes', function($api){
-
     return $api->getRoutes();
-    
 });
 ```
 
-### Example: Routing with regex matching
+### Example: Routing with REGEX and get dynamic parameters
 ```php
 $api->get('/test/([0-9]+)/([0-9]+)', function ($api){
 
@@ -59,10 +61,13 @@ $api->get('/test/([0-9]+)/([0-9]+)', function ($api){
 
 });
 ```
-URLs are REGEX patterns in which multiple matching parameters can be specified. In this example, when endpoint url /test/**123**/**456** is called, this function will return [123, 456].
+The above example will return an array with two matching digits specified in the URL.
 
-### More examples with callback:
-This example shows how multiple HTTP methods can be used and how to define respective callback functions, if route file **routes/route.test.php** is present, it will be included automatically.
+### Route auto-inclusion
+Route files will be automatically included if exists based on first level URI path. For example, when **/foo/** route is defined and called, **routes/route.foo.php** will be automatically included.
+
+### More examples with callback
+This example shows how multiple HTTP methods can be routed to different callback functions. You can find them in the example source as well.
 ```php
 $api->get('/test/?', 'get_all');
 $api->get('/test/([0-9]+)', 'get');
@@ -71,12 +76,14 @@ $api->put('/test/([0-9]+)', 'update');
 $api->delete('/test/([0-9]+)', 'delete');
 ```
 
+### Login endopoint example with embedded JWT token generator:
 Login example with JWT token-> /routes/route.login.php
 ```php
 $api->post('/login', 'login');
 ```
 
 ### Parse the request
+This will process the request
 ```php
 $api->parseRequest();
 ```
