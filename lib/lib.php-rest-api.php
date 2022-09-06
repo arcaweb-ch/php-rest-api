@@ -504,31 +504,33 @@ class RestApi{
         /**
          * Parse request
          */
-
+        
         $this->requestMethod = strtolower($_SERVER['REQUEST_METHOD']);
 
-        if (empty($_GET['u'])) {
+        if (!isset($_GET['u'])) {
             $this->outputBadRequest('mod_rewrite rule not configured');
         }
-
-        $this->requestURI = $_GET['u'];
+        
+        $this->requestURI = trim($_GET['u'], '/');
 
         /* 
             Enumerate routes
         */
 
         foreach($this->routes[$this->requestMethod] as $uri => $callback) {
+            
             if (preg_match('/^' . str_replace('/','\/',$uri) . '$/', $this->requestURI, $matches)) {
+                
                 $this->processedRoute = $this->routes[$this->requestMethod][$uri];
                 $this->requestMatches = $matches;
                 break;
             }
         }
-
+        
         /* 
             Check if route exists
         */
-
+        
         if (empty($this->processedRoute)) {
             $this->outputNotFound('Requested route was not found');
         }
@@ -538,13 +540,23 @@ class RestApi{
         */
 
         $parts = explode('/', $this->requestURI);
-        $this->endpoint = $parts[1];
 
-        if ($this->autoIncludeRouteFile){
-            if (file_exists(dirname($_SERVER['SCRIPT_FILENAME']).'/routes/route.' . $this->endpoint . '.php')){
-                require_once 'routes/route.' . $this->endpoint . '.php';
+        if (sizeof($parts) > 0) {
+            
+            $this->endpoint = $parts[0];
+
+            if ($this->autoIncludeRouteFile){
+                if (file_exists(dirname($_SERVER['SCRIPT_FILENAME']).'/routes/route.' . $this->endpoint . '.php')){
+                    require_once 'routes/route.' . $this->endpoint . '.php';
+                }
             }
+
+        } else {
+
+            $this->endpoint = '';
+
         }
+
 
         /*
             Callback processor
@@ -564,6 +576,5 @@ class RestApi{
     }
 
 }
-
 
 ?>

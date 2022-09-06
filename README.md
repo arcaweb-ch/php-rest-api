@@ -31,7 +31,7 @@ $api = new RestApi(array(
 
 ### Define your routes
 ```php
-$api->get('/', function(){
+$api->get('', function(){
     return "It works!";
 });
 ```
@@ -41,20 +41,20 @@ $api->get('/', function(){
 function my_callback(){
     return 'Awesome!';
 }
-$api->get('/awesome', 'my_callback');
+$api->get('awesome', 'my_callback');
 ```
 
 ### Example: Use API methods
 **$api** is passed to route callback functions to make public methods always available.
 ```php
-$api->get('/routes', function($api){
+$api->get('routes', function($api){
     return $api->getRoutes();
 });
 ```
 
 ### Example: Routing with REGEX and get dynamic parameters
 ```php
-$api->get('/test/([0-9]+)/([0-9]+)', function ($api){
+$api->get('test/([0-9]+)/([0-9]+)', function ($api){
 
     $matches = $api->getMatches();
     return $matches;
@@ -69,17 +69,17 @@ Route files will be automatically included if exists based on first level URI pa
 ### More examples with callback
 This example shows how multiple HTTP methods can be routed to different callback functions. You can find them in the example source as well.
 ```php
-$api->get('/test/?', 'get_all');
-$api->get('/test/([0-9]+)', 'get');
-$api->post('/test/([0-9]+)', 'insert');
-$api->put('/test/([0-9]+)', 'update');
-$api->delete('/test/([0-9]+)', 'delete');
+$api->get('test/?', 'get_all');
+$api->get('test/([0-9]+)', 'get');
+$api->post('test/([0-9]+)', 'insert');
+$api->put('test/([0-9]+)', 'update');
+$api->delete('test/([0-9]+)', 'delete');
 ```
 
 ### Login endopoint example with embedded JWT token generator:
 Login example with JWT token-> /routes/route.login.php
 ```php
-$api->post('/login', 'login');
+$api->post('login', 'login');
 ```
 
 ### Parse the request

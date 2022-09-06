@@ -21,7 +21,7 @@ $api = new RestApi(array(
 
 /* Define base route with inline response */
 
-$api->get('/', function($api){
+$api->get('', function($api){
 
     return "It works!";
 
@@ -29,7 +29,7 @@ $api->get('/', function($api){
 
 /* This route will return all defined routes */
 
-$api->get('/routes', function($api){
+$api->get('routes', function($api){
 
     return $api->getRoutes();
 
@@ -37,7 +37,7 @@ $api->get('/routes', function($api){
 
 /* This returns an array with passed parameters matching this regex pattern */
 
-$api->get('/test/([0-9]+)/([0-9]+)', function ($api){
+$api->get('test/([0-9]+)/([0-9]+)', function ($api){
 
     $matches = $api->getMatches();
     return $matches;
@@ -46,19 +46,19 @@ $api->get('/test/([0-9]+)/([0-9]+)', function ($api){
 
 /* Real world example with multiple request methods and external callbacks -> /routes/route.test.php */
 
-$api->get('/test/?', 'get_all');
-$api->get('/test/([0-9]+)', 'get');
-$api->post('/test/([0-9]+)', 'insert');
-$api->put('/test/([0-9]+)', 'update');
-$api->delete('/test/([0-9]+)', 'delete');
+$api->get('test/?', 'get_all');
+$api->get('test/([0-9]+)', 'get');
+$api->post('test/([0-9]+)', 'insert');
+$api->put('test/([0-9]+)', 'update');
+$api->delete('test/([0-9]+)', 'delete');
 
 /* Search route -> /routes/route.search.php */
 
-$api->get('/search/([\w\W]+)', 'search');
+$api->get('search/([\w\W]+)', 'search');
 
 /* login example and JWT token -> /routes/route.login.php */
 
-$api->post('/login', 'login');
+$api->post('login', 'login');
 
 /* Parse the request */
 $api->parseRequest();
