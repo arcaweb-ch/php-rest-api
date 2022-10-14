@@ -236,7 +236,7 @@ class RestApi{
             $error_code = 500;
         }
 
-        header('HTTP/1.1 ' . $error_code . ' ' . $error_codes[$error_code]);
+        header($_SERVER['SERVER_PROTOCOL'] . ' ' . $error_code . ' ' . $error_codes[$error_code], true, $error_code);
 
         $this->outputData(array(
             'code' => $error_code,
@@ -255,15 +255,11 @@ class RestApi{
 
     }
 
-    public function outputServerError($error_message = '',$serverHeader=false){
+    public function outputServerError($error_message = ''){
+
         /**
          * Output server error
          */
-
-        if ($serverHeader) {
-            header($_SERVER['SERVER_PROTOCOL'] . ' 500 Internal Server Error', true, 500);
-            die();
-        }
 
         $this->outputError(500, $error_message);
 
