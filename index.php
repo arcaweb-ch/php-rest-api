@@ -13,11 +13,7 @@ include_once('lib/lib.php-rest-api.php');
 
 /* Init API instance */
 
-$api = new RestApi(array(
-
-    'return_server_errors' => true,
-
-));
+$api = new RestApi();
 
 /* Define base route with inline response */
 

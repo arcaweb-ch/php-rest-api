@@ -39,16 +39,17 @@ class RestApi{
     private $requestBody;
     private $requestMatches;
     private $processedRoute;
-    private $autoIncludeRouteFile;
     private $endpoint;
+    private $fatalError = false;
 
     // constructor
-    function __construct($config) {
-
+    function __construct($config = array()) {
+       
         $this->config = array_merge(array(
             'log_errors' => false,
-            'return_server_errors' => false,
-            'error_log_path' => ''
+            'return_server_errors' => LOG_WARNING, // https://www.php.net/manual/en/function.syslog.php
+            'error_log_path' => '',
+            'auto_include_route_file' => true            
         ), $config);
 
         $this->routes = array();
@@ -56,7 +57,6 @@ class RestApi{
         $this->routes['post'] = array();
         $this->routes['put'] = array();
         $this->routes['delete'] = array();
-        $this->autoIncludeRouteFile = true;
         
         $this->initErrorHandler();
        
@@ -78,9 +78,26 @@ class RestApi{
          */
 
         error_reporting(E_ALL);
-        ini_set("display_errors", "off");
+        ini_set('display_errors', 0);
 
         set_error_handler(array($this, 'errorHandler'));
+        register_shutdown_function(array($this, 'shutdownHandler'));
+
+    }
+
+    public function shutdownHandler(){
+
+        /**
+         * Shutdown handler
+         */
+
+        $error = error_get_last();
+
+        if($error !== NULL){
+
+            $this->errorHandler($error['type'], $error['message'], $error['file'], $error['line']);
+
+        }
 
     }
 
@@ -130,40 +147,36 @@ class RestApi{
     }
 
     private function errorHandler($code, $description, $file = null, $line = null, $context = null) {
-
+        
         /**
          * Error handling
          */
-    
-        $displayErrors = ini_get("display_errors");
-        $displayErrors = strtolower($displayErrors);
-        
-        if (error_reporting() === 0 || $displayErrors === "on") {
+
+        if (!(error_reporting() & $code)) {
             return false;
         }
-    
+      
         list($error, $log) = $this->mapErrorCode($code);
     
         $data = array(
-            'level' => $log,
+            'level' => $error,
             'code' => $code,
-            'error' => $error,
-            'description' => $description,
             'file' => $file,
             'line' => $line,
-            'context' => $context,
-            'path' => $file,
-            'message' => $error . ' (' . $code . '): ' . $description . ' in [' . $file . ', line ' . $line . ']'
+            'description' => $description,
+
         );
     
         if ($this->config['log_errors']){
             $this->fileLog($data);
         }
-    
-        if ($this->config['return_server_errors']){
-            $this->outputError(500, $data);
-        } else {
-            $this->outputError(500);
+
+        if ($log <= $this->config['return_server_errors']) {
+
+            header('HTTP/1.1 500 Internal Server Error');
+            $this->outputData($data);
+            die();
+
         }
     
     }
@@ -196,6 +209,9 @@ class RestApi{
          */
 
         header('Content-Type: application/json');
+
+        $this->response = $data;
+
         echo json_encode($data);
 
         die();
@@ -229,7 +245,7 @@ class RestApi{
 
     }
 
-    public function outputBadRequest($error_message){
+    public function outputBadRequest($error_message = ''){
 
         /**
          * Output bad request
@@ -239,11 +255,15 @@ class RestApi{
 
     }
 
-    public function outputServerError($error_message = ''){
-
+    public function outputServerError($error_message = '',$serverHeader=false){
         /**
          * Output server error
          */
+
+        if ($serverHeader) {
+            header($_SERVER['SERVER_PROTOCOL'] . ' 500 Internal Server Error', true, 500);
+            die();
+        }
 
         $this->outputError(500, $error_message);
 
@@ -316,7 +336,7 @@ class RestApi{
          */
 
         if (!empty($this->requestBody)){
-
+            
             $requestData = json_decode($this->requestBody, true);
 
             if (json_last_error() !== JSON_ERROR_NONE) {
@@ -328,6 +348,21 @@ class RestApi{
         }
 
         return $requestData;
+    }
+
+    public function getParam($param) {
+
+        /**
+         * Get request body param
+         */
+
+        $data = $this->getRequestBodyData();
+
+        if (isset($data[$param])){
+            return $data[$param];
+        } else {
+            return null;
+        }
 
     }
 
@@ -365,7 +400,7 @@ class RestApi{
          * Auto include route file
          */
 
-        $this->autoIncludeRouteFile = $bool;
+        $this->config['auto_include_route_file'] = $bool;
 
     }
 
@@ -378,7 +413,7 @@ class RestApi{
         $errors = array();
 
         $data = $this->getRequestBodyData();
-
+        
         foreach ($validator as $param => $value) {
             
             if (!isset($data[$param]) && strpos($value, 'required') !== false) {
@@ -430,6 +465,12 @@ class RestApi{
                     }
                 }
 
+                if (strpos($value, 'datetime') !== false) {
+                    if (!filter_var($data[$param], FILTER_VALIDATE_REGEXP, array('options' => array('regexp' => '/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/')))) {
+                        array_push($errors, $param . ' must be a valid datetime');
+                    }
+                }
+
                 if (strpos($value, 'date') !== false) {
                     if (!filter_var($data[$param], FILTER_VALIDATE_REGEXP, array('options' => array('regexp' => '/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/')))) {
                         array_push($errors, $param . ' must be a valid date');
@@ -442,11 +483,6 @@ class RestApi{
                     }
                 }
 
-                if (strpos($value, 'datetime') !== false) {
-                    if (!filter_var($data[$param], FILTER_VALIDATE_REGEXP, array('options' => array('regexp' => '/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/')))) {
-                        array_push($errors, $param . ' must be a valid datetime');
-                    }
-                }
             }
 
         }
@@ -542,10 +578,9 @@ class RestApi{
         $parts = explode('/', $this->requestURI);
 
         if (sizeof($parts) > 0) {
-            
             $this->endpoint = $parts[0];
 
-            if ($this->autoIncludeRouteFile){
+            if ($this->config['auto_include_route_file']){
                 if (file_exists(dirname($_SERVER['SCRIPT_FILENAME']).'/routes/route.' . $this->endpoint . '.php')){
                     require_once 'routes/route.' . $this->endpoint . '.php';
                 }
@@ -569,8 +604,21 @@ class RestApi{
         }
 
         $this->requestBody = file_get_contents('php://input');
+
+
         $this->response = call_user_func($this->processedRoute, $this);
 
+        if ($error = error_get_last()) {
+
+            // If an error was sent, don't output anything
+           
+            list($err, $log) = $this->mapErrorCode($error['type']);
+
+            if ($log <= $this->config['return_server_errors']) {
+                return;
+            }
+        }
+        
         $this->outputData($this->response);
 
     }
