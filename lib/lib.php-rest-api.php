@@ -11,12 +11,12 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *  
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *  
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
@@ -27,29 +27,31 @@
  * @link        https://github.com/arcaweb-ch/php-rest-api
  */
 
-class RestApi{
+class RestApi {
 
-    private $config = array();
+    private $__config = array();
 
-    private $routes;
-    private $requestMethod;
-    private $requestURI;
-    private $processedURI;
-    private $processedCallback;
-    private $requestBody;
-    private $requestMatches;
-    private $processedRoute;
-    private $endpoint;
-    private $fatalError = false;
+    private $__routes;
+    private $__requestMethod;
+    private $__requestURI;
+    private $__processedURI;
+    private $__processedCallback;
+    private $__requestBody;
+    private $__requestMatches;
+    private $__processedRoute;
+    private $__endpoint;
+    private $__fatalError = false;
 
     // constructor
-    function __construct($config = array()) {
-       
+    public function __construct($config = array()) {
+
         $this->config = array_merge(array(
             'log_errors' => false,
-            'return_server_errors' => LOG_WARNING, // https://www.php.net/manual/en/function.syslog.php
-            'error_log_path' => '',
-            'auto_include_route_file' => true            
+            'return_server_errors' => false,
+            'return_server_error_level' => LOG_NOTICE, // https://www.php.net/manual/en/function.syslog.php
+             'log_server_error_level' => LOG_NOTICE, // https://www.php.net/manual/en/function.syslog.php
+             'error_log_path' => '',
+            'auto_include_route_file' => true,
         ), $config);
 
         $this->routes = array();
@@ -57,12 +59,12 @@ class RestApi{
         $this->routes['post'] = array();
         $this->routes['put'] = array();
         $this->routes['delete'] = array();
-        
+
         $this->initErrorHandler();
-       
+
     }
-    
-    private function base64url_encode($str) {
+
+    private function __base64url_encode($str) {
 
         /**
          * Helper function to encode data
@@ -71,7 +73,7 @@ class RestApi{
         return rtrim(strtr(base64_encode($str), '+/', '-_'), '=');
     }
 
-    private function initErrorHandler(){
+    private function __initErrorHandler() {
 
         /**
          * Error handling initialization
@@ -85,7 +87,7 @@ class RestApi{
 
     }
 
-    public function shutdownHandler(){
+    public function shutdownHandler() {
 
         /**
          * Shutdown handler
@@ -93,7 +95,7 @@ class RestApi{
 
         $error = error_get_last();
 
-        if($error !== NULL){
+        if ($error !== NULL) {
 
             $this->errorHandler($error['type'], $error['message'], $error['file'], $error['line']);
 
@@ -101,53 +103,66 @@ class RestApi{
 
     }
 
-    private function mapErrorCode($code) {
+    private function __mapErrorCode($code) {
 
         /**
          * Map PHP error codes
          */
 
-        $error = $log = null;
+        $type = $level = null;
 
         switch ($code) {
-            case E_PARSE:
-            case E_ERROR:
-            case E_CORE_ERROR:
-            case E_COMPILE_ERROR:
-            case E_USER_ERROR:
-                $error = 'Fatal Error';
-                $log = LOG_ERR;
-                break;
-            case E_WARNING:
-            case E_USER_WARNING:
-            case E_COMPILE_WARNING:
-            case E_RECOVERABLE_ERROR:
-                $error = 'Warning';
-                $log = LOG_WARNING;
-                break;
-            case E_NOTICE:
-            case E_USER_NOTICE:
-                $error = 'Notice';
-                $log = LOG_NOTICE;
-                break;
-            case E_STRICT:
-                $error = 'Strict';
-                $log = LOG_NOTICE;
-                break;
-            case E_DEPRECATED:
-            case E_USER_DEPRECATED:
-                $error = 'Deprecated';
-                $log = LOG_NOTICE;
-                break;
-            default :
-                break;
+        case E_ERROR: // 1 //
+            $type = 'E_ERROR';
+            $level = LOG_ERR; // (4)
+        case E_WARNING: // 2 //
+            $type = 'E_WARNING';
+            $level = LOG_WARNING; // (5)
+        case E_PARSE: // 4 //
+            $type = 'E_PARSE ERROR';
+            $level = LOG_ERR;
+        case E_NOTICE: // 8 //
+            $type = 'E_NOTICE';
+            $level = LOG_NOTICE; // (6)
+        case E_CORE_ERROR: // 16 //
+            $type = 'E_CORE_ERROR';
+            $level = LOG_ERR;
+        case E_CORE_WARNING: // 32 //
+            $type = 'E_CORE_WARNING';
+            $level = LOG_WARNING;
+        case E_COMPILE_ERROR: // 64 //
+            $type = 'E_COMPILE_ERROR';
+            $level = LOG_ERR;
+        case E_COMPILE_WARNING: // 128 //
+            $type = 'E_COMPILE_WARNING';
+            $level = LOG_WARNING;
+        case E_USER_ERROR: // 256 //
+            $type = 'E_USER_ERROR';
+            $level = LOG_ERR;
+        case E_USER_WARNING: // 512 //
+            $type = 'E_USER_WARNING';
+            $level = LOG_WARNING;
+        case E_USER_NOTICE: // 1024 //
+            $type = 'E_USER_NOTICE';
+            $level = LOG_NOTICE;
+        case E_STRICT: // 2048 //
+            $type = 'E_STRICT NOTICE';
+            $level = LOG_NOTICE;
+        case E_RECOVERABLE_ERROR: // 4096 //
+            $type = 'E_RECOVERABLE_ERROR WARNING';
+            $level = LOG_WARNING;
+        case E_DEPRECATED: // 8192 //
+            $type = 'E_DEPRECATED NOTICE';
+            $level = LOG_NOTICE;
+        case E_USER_DEPRECATED: // 16384 //
+            $type = 'E_USER_DEPRECATED NOTICE';
+            $level = LOG_NOTICE;
         }
-        
-        return array($error, $log);
+        return array($type, $level);
     }
 
-    private function errorHandler($code, $description, $file = null, $line = null, $context = null) {
-        
+    private function __errorHandler($code, $description, $file = null, $line = null, $context = null) {
+
         /**
          * Error handling
          */
@@ -155,30 +170,32 @@ class RestApi{
         if (!(error_reporting() & $code)) {
             return false;
         }
-      
-        list($error, $log) = $this->mapErrorCode($code);
-    
+
+        list($type, $level) = $this->mapErrorCode($code);
+
         $data = array(
-            'level' => $error,
-            'code' => $code,
+            'type' => $type . ' (' . $code . ')',
+            'description' => $description,
             'file' => $file,
             'line' => $line,
-            'description' => $description,
-
         );
-    
-        if ($this->config['log_errors']){
-            $this->fileLog($data);
+
+        // log error
+
+        if ($this->config['log_errors']) {
+            if ($level <= $this->config['log_server_error_level']) {
+                $this->fileLog($data);
+            }
         }
 
-        if ($log <= $this->config['return_server_errors']) {
+        // return error
 
-            header('HTTP/1.1 500 Internal Server Error');
-            $this->outputData($data);
-            die();
-
+        if ($this->config['return_server_errors'] && $level <= $this->config['return_server_error_level']) {
+            $this->outputServerError($data);
+        } else {
+            $this->outputServerError();
         }
-    
+
     }
 
     public function fileLog($logData) {
@@ -186,23 +203,23 @@ class RestApi{
         /**
          * Log errors to file
          */
-    
-        if (empty($this->config['error_log_path'])){
+
+        if (empty($this->config['error_log_path'])) {
             return;
         }
 
         $fh = fopen($this->config['error_log_path'], 'a+');
-        
+
         if (is_array($logData)) {
             $logData = print_r($logData, 1);
         }
-    
+
         fwrite($fh, $logData);
         fclose($fh);
-    
+
     }
 
-    public function outputData($data){
+    public function outputData($data) {
 
         /**
          * Output data
@@ -210,14 +227,12 @@ class RestApi{
 
         header('Content-Type: application/json');
 
-        $this->response = $data;
-
         echo json_encode($data);
 
         die();
     }
 
-    public function outputError($error_code, $error_message = ''){
+    public function outputError($error_code, $error_message = '') {
 
         /**
          * Output errors
@@ -232,20 +247,36 @@ class RestApi{
             500 => 'Internal Server Error',
         );
 
-        if (!in_array($error_code, array_keys($error_codes))){
+        if (!in_array($error_code, array_keys($error_codes))) {
             $error_code = 500;
+        }
+
+        if ($error_code != 500 && $error = error_get_last()) {
+
+            // If a fatal error was already sent, don't output anything else
+
+            list($type, $level) = $this->mapErrorCode($error['type']);
+
+            if ($this->config['return_server_errors'] && $level <= $this->config['return_server_error_level']) {
+                return;
+            }
         }
 
         header($_SERVER['SERVER_PROTOCOL'] . ' ' . $error_code . ' ' . $error_codes[$error_code], true, $error_code);
 
-        $this->outputData(array(
-            'code' => $error_code,
-            'error' => !empty($error_message) ? $error_message : $error_codes[$error_code],
-        ));
+        if (!empty($error_message)) {
+
+            $this->outputData(array(
+                'code' => $error_code,
+                'error' => !empty($error_message) ? $error_message : $error_codes[$error_code],
+            ));
+        }
+
+        die();
 
     }
 
-    public function outputBadRequest($error_message = ''){
+    public function outputBadRequest($error_message = '') {
 
         /**
          * Output bad request
@@ -255,7 +286,7 @@ class RestApi{
 
     }
 
-    public function outputServerError($error_message = ''){
+    public function outputServerError($error_message = '') {
 
         /**
          * Output server error
@@ -265,7 +296,7 @@ class RestApi{
 
     }
 
-    public function outputNotFound(){
+    public function outputNotFound() {
 
         /**
          * Output not found
@@ -331,8 +362,8 @@ class RestApi{
          * Get request body data
          */
 
-        if (!empty($this->requestBody)){
-            
+        if (!empty($this->requestBody)) {
+
             $requestData = json_decode($this->requestBody, true);
 
             if (json_last_error() !== JSON_ERROR_NONE) {
@@ -354,7 +385,7 @@ class RestApi{
 
         $data = $this->getRequestBodyData();
 
-        if (isset($data[$param])){
+        if (isset($data[$param])) {
             return $data[$param];
         } else {
             return null;
@@ -382,7 +413,7 @@ class RestApi{
 
         $matches = $this->getMatches();
 
-        if (count($matches) > 0){
+        if (count($matches) > 0) {
             return $matches[0];
         } else {
             $this->outputServerError('getFirstMatch: No match found');
@@ -409,9 +440,9 @@ class RestApi{
         $errors = array();
 
         $data = $this->getRequestBodyData();
-        
+
         foreach ($validator as $param => $value) {
-            
+
             if (!isset($data[$param]) && strpos($value, 'required') !== false) {
                 array_push($errors, $param . ' is required');
                 continue;
@@ -496,7 +527,7 @@ class RestApi{
         $header = $this->base64url_encode(json_encode(array('alg' => 'HS256', 'typ' => 'JWT')));
         $payload = $this->base64url_encode(json_encode($payload));
         $signature = $this->base64url_encode(hash_hmac('sha256', $header . '.' . $payload, $jwt_secret_key, true));
-        
+
         $jwt = $header . '.' . $payload . '.' . $signature;
 
         return $jwt;
@@ -523,7 +554,7 @@ class RestApi{
         $base64_url_signature = $this->base64url_encode($signature);
 
         $is_signature_valid = ($base64_url_signature === $signature_provided);
-        
+
         if ($is_token_expired || !$is_signature_valid) {
             return FALSE;
         } else {
@@ -536,48 +567,48 @@ class RestApi{
         /**
          * Parse request
          */
-        
+
         $this->requestMethod = strtolower($_SERVER['REQUEST_METHOD']);
 
         if (!isset($_GET['u'])) {
             $this->outputBadRequest('mod_rewrite rule not configured');
         }
-        
+
         $this->requestURI = trim($_GET['u'], '/');
 
-        /* 
-            Enumerate routes
-        */
+        /*
+        Enumerate routes
+         */
 
-        foreach($this->routes[$this->requestMethod] as $uri => $callback) {
-            
-            if (preg_match('/^' . str_replace('/','\/',$uri) . '$/', $this->requestURI, $matches)) {
-                
+        foreach ($this->routes[$this->requestMethod] as $uri => $callback) {
+
+            if (preg_match('/^' . str_replace('/', '\/', $uri) . '$/', $this->requestURI, $matches)) {
+
                 $this->processedRoute = $this->routes[$this->requestMethod][$uri];
                 $this->requestMatches = $matches;
                 break;
             }
         }
-        
-        /* 
-            Check if route exists
-        */
-        
+
+        /*
+        Check if route exists
+         */
+
         if (empty($this->processedRoute)) {
             $this->outputNotFound('Requested route was not found');
         }
 
         /*
-            Auto include route file if exists
-        */
+        Auto include route file if exists
+         */
 
         $parts = explode('/', $this->requestURI);
 
         if (sizeof($parts) > 0) {
             $this->endpoint = $parts[0];
 
-            if ($this->config['auto_include_route_file']){
-                if (file_exists(dirname($_SERVER['SCRIPT_FILENAME']).'/routes/route.' . $this->endpoint . '.php')){
+            if ($this->config['auto_include_route_file']) {
+                if (file_exists(dirname($_SERVER['SCRIPT_FILENAME']) . '/routes/route.' . $this->endpoint . '.php')) {
                     require_once 'routes/route.' . $this->endpoint . '.php';
                 }
             }
@@ -588,10 +619,9 @@ class RestApi{
 
         }
 
-
         /*
-            Callback processor
-        */
+        Callback processor
+         */
 
         if (!is_callable($this->processedRoute)) {
             if (!function_exists($this->processedRoute)) {
@@ -600,21 +630,19 @@ class RestApi{
         }
 
         $this->requestBody = file_get_contents('php://input');
-
-
         $this->response = call_user_func($this->processedRoute, $this);
 
         if ($error = error_get_last()) {
 
             // If an error was sent, don't output anything
-           
-            list($err, $log) = $this->mapErrorCode($error['type']);
 
-            if ($log <= $this->config['return_server_errors']) {
+            list($type, $level) = $this->mapErrorCode($error['type']);
+
+            if ($this->config['return_server_errors'] && $level <= $this->config['return_server_error_level']) {
                 return;
             }
         }
-        
+
         $this->outputData($this->response);
 
     }
