@@ -3,9 +3,9 @@
 /**
  * PHP REST API Class
  *
- * A simple PHP REST API Class
+ * A simple PHP REST Micro‑framework
  *
- * PHP version 7.0
+ * PHP version 8.1
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,633 +21,464 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * @author      Lorenzo Conti <l.conti@arcaweb.ch>
- * @copyright   2022 Arcaweb
+ * @copyright   2025 Arcaweb
  * @license     https://www.gnu.org/licenses/gpl-3.0.txt
- * @version     SVN: 1.0.0
+ * @version     SVN: 2.0.0
  * @link        https://github.com/arcaweb-ch/php-rest-api
  */
 
-class RestApi{
+<?php
 
-    private $config = array();
+declare(strict_types=1);
 
-    private $routes;
-    private $requestMethod;
-    private $requestURI;
-    private $processedURI;
-    private $processedCallback;
-    private $requestBody;
-    private $requestMatches;
-    private $processedRoute;
-    private $endpoint;
-    private $fatalError = false;
+namespace App;
 
-    // constructor
-    function __construct($config = array()) {
-       
-        $this->config = array_merge(array(
-            'log_errors' => false,
-            'return_server_errors' => false,
-            'return_server_error_level' => LOG_NOTICE, // https://www.php.net/manual/en/function.syslog.php
-            'log_server_error_level' => LOG_NOTICE, // https://www.php.net/manual/en/function.syslog.php
-            'error_log_path' => '',
-            'auto_include_route_file' => true
-        ), $config);
+use Attribute;
+use DateTimeImmutable;
+use JsonException;
+use ReflectionClass;
+use ReflectionMethod;
+use Throwable;
 
-        $this->routes = array();
-        $this->routes['get'] = array();
-        $this->routes['post'] = array();
-        $this->routes['put'] = array();
-        $this->routes['delete'] = array();
-        
-        $this->initErrorHandler();
-       
-    }
-    
-    private function base64url_encode($str) {
+/* -----------------------------------------------------------
+ | Config                                                     |
+ -----------------------------------------------------------*/
+final class Config
+{
+    public function __construct(
+        public readonly bool   $displayErrors        = false,
+        public readonly bool   $enableCors           = false,
+        public readonly array  $corsOrigins          = ['*'],
+        public readonly array  $corsMethods          = ['GET','POST','PUT','PATCH','DELETE','OPTIONS','HEAD'],
+        public readonly array  $corsHeaders          = ['Content-Type','Authorization'],
+        public readonly bool   $corsAllowCredentials = false,
+    ) {}
+}
 
-        /**
-         * Helper function to encode data
-         */
+/* -----------------------------------------------------------
+ | Response                                                   |
+ -----------------------------------------------------------*/
+final class Response
+{
+    private const SEC_HEADERS = [
+        'X-Content-Type-Options' => 'nosniff',
+        'Referrer-Policy'        => 'same-origin',
+        'X-Frame-Options'        => 'DENY',
+    ];
 
-        return rtrim(strtr(base64_encode($str), '+/', '-_'), '=');
-    }
+    public function __construct(
+        public readonly int   $status  = 200,
+        public readonly array $headers = self::SEC_HEADERS,
+        public readonly mixed $body    = null,
+    ) {}
 
-    private function initErrorHandler(){
-
-        /**
-         * Error handling initialization
-         */
-
-        error_reporting(E_ALL);
-        ini_set('display_errors', 0);
-
-        set_error_handler(array($this, 'errorHandler'));
-        register_shutdown_function(array($this, 'shutdownHandler'));
-
-    }
-
-    public function shutdownHandler(){
-
-        /**
-         * Shutdown handler
-         */
-
-        $error = error_get_last();
-
-        if($error !== NULL){
-
-            $this->errorHandler($error['type'], $error['message'], $error['file'], $error['line']);
-
+    public function send(): void
+    {
+        http_response_code($this->status);
+        foreach ($this->headers as $k => $v) {
+            header($k . ': ' . $v);
         }
-
-    }
-
-    private function mapErrorCode($code) {
-
-        /**
-         * Map PHP error codes
-         */
-
-        $type = $level = null;
-
-        switch($code){
-            case E_ERROR: // 1 //
-                $type = 'E_ERROR';
-                $level = LOG_ERR; // (4)
-            case E_WARNING: // 2 //
-                $type = 'E_WARNING';
-                $level = LOG_WARNING; // (5)
-            case E_PARSE: // 4 //
-                $type = 'E_PARSE ERROR';
-                $level = LOG_ERR;
-            case E_NOTICE: // 8 //
-                $type = 'E_NOTICE';
-                $level = LOG_NOTICE; // (6)
-            case E_CORE_ERROR: // 16 //
-                $type = 'E_CORE_ERROR';
-                $level = LOG_ERR;
-            case E_CORE_WARNING: // 32 //
-                $type = 'E_CORE_WARNING';
-                $level = LOG_WARNING;
-            case E_COMPILE_ERROR: // 64 //
-                $type = 'E_COMPILE_ERROR';
-                $level = LOG_ERR;
-            case E_COMPILE_WARNING: // 128 //
-                $type = 'E_COMPILE_WARNING';
-                $level = LOG_WARNING;
-            case E_USER_ERROR: // 256 //
-                $type = 'E_USER_ERROR';
-                $level = LOG_ERR;
-            case E_USER_WARNING: // 512 //
-                $type = 'E_USER_WARNING';
-                $level = LOG_WARNING;
-            case E_USER_NOTICE: // 1024 //
-                $type = 'E_USER_NOTICE';
-                $level = LOG_NOTICE;
-            case E_STRICT: // 2048 //
-                $type = 'E_STRICT NOTICE';
-                $level = LOG_NOTICE;
-            case E_RECOVERABLE_ERROR: // 4096 //
-                $type = 'E_RECOVERABLE_ERROR WARNING';
-                $level = LOG_WARNING;
-            case E_DEPRECATED: // 8192 //
-                $type = 'E_DEPRECATED NOTICE';
-                $level = LOG_NOTICE;
-            case E_USER_DEPRECATED: // 16384 //
-                $type = 'E_USER_DEPRECATED NOTICE';
-                $level = LOG_NOTICE;
-        }
-        return array($type, $level);
-    }
-
-    private function errorHandler($code, $description, $file = null, $line = null, $context = null) {
-        
-        /**
-         * Error handling
-         */
-
-        if (!(error_reporting() & $code)) {
-            return false;
-        }
-      
-        list($type, $level) = $this->mapErrorCode($code);
-    
-        $data = array(
-            'type' => $type.' ('.$code.')',
-            'description' => $description,
-            'file' => $file,
-            'line' => $line,
-        );
-
-        // log error
-    
-        if ($this->config['log_errors']){
-            if ($level <= $this->config['log_server_error_level']){
-                $this->fileLog($data);
+        if ($this->body !== null && $_SERVER['REQUEST_METHOD'] !== 'HEAD') {
+            try {
+                echo is_string($this->body)
+                    ? $this->body
+                    : json_encode($this->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            } catch (JsonException) {
+                echo (string) $this->body;
             }
         }
+    }
 
-        // return error
+    public function withHeaders(array $headers): self
+    {
+        return new self($this->status, array_merge($this->headers, $headers), $this->body);
+    }
+}
 
-        if ($this->config['return_server_errors'] && $level <= $this->config['return_server_error_level']) {
-            $this->outputServerError($data);
-        } else {
-            $this->outputServerError();
+/* -----------------------------------------------------------
+ | Request                                                    |
+ -----------------------------------------------------------*/
+final class Request
+{
+    public readonly string $method;
+    public readonly string $uri;
+    public readonly string $rawBody;
+    public array $attributes = [];
+    private ?array $jsonCache = null;
+
+    public function __construct()
+    {
+        $this->method  = strtolower($_SERVER['REQUEST_METHOD'] ?? 'get');
+        $this->uri = trim((string)($_GET['u'] ?? ''), '/');
+        $this->rawBody = file_get_contents('php://input');
+    }
+
+    public function json(): array
+    {
+        if ($this->jsonCache !== null) return $this->jsonCache;
+
+        $ct = strtolower($_SERVER['CONTENT_TYPE'] ?? '');
+        if (!str_starts_with($ct, 'application/json')) return $this->jsonCache = [];
+        if ($this->rawBody === '') return $this->jsonCache = [];
+
+        try {
+            return $this->jsonCache = json_decode($this->rawBody, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new BadRequestException('Malformed JSON: ' . $e->getMessage());
         }
-    
     }
 
-    public function fileLog($logData) {
-
-        /**
-         * Log errors to file
-         */
-    
-        if (empty($this->config['error_log_path'])){
-            return;
-        }
-
-        $fh = fopen($this->config['error_log_path'], 'a+');
-        
-        if (is_array($logData)) {
-            $logData = print_r($logData, 1);
-        }
-    
-        fwrite($fh, $logData);
-        fclose($fh);
-    
+    public function getHeader(string $name): ?string
+    {
+        $key = 'HTTP_' . str_replace('-', '_', strtoupper($name));
+        return $_SERVER[$key] ?? null;
     }
 
-    public function outputData($data){
-
-        /**
-         * Output data
-         */
-
-        header('Content-Type: application/json');
-
-        echo json_encode($data);
-
-        die();
+    public function query(): array
+    {
+        $qs = $_GET;
+        unset($qs['u']);
+        return $qs;
     }
 
-    public function outputError($error_code, $error_message = ''){
-
-        /**
-         * Output errors
-         */
-
-        $error_codes = array(
-            400 => 'Bad Request',
-            401 => 'Unauthorized',
-            403 => 'Forbidden',
-            404 => 'Not Found',
-            405 => 'Method Not Allowed',
-            500 => 'Internal Server Error',
-        );
-
-        if (!in_array($error_code, array_keys($error_codes))){
-            $error_code = 500;
-        }
-
-        if ($error_code != 500 && $error = error_get_last()) {
-
-            // If a fatal error was already sent, don't output anything else
-           
-            list($type, $level) = $this->mapErrorCode($error['type']);
-            
-            if ($this->config['return_server_errors'] && $level <= $this->config['return_server_error_level']) {
-                return;
-            }
-        }
-
-        header($_SERVER['SERVER_PROTOCOL'] . ' ' . $error_code . ' ' . $error_codes[$error_code], true, $error_code);
-
-        if (!empty($error_message)){
-            
-            $this->outputData(array(
-                'code' => $error_code,
-                'error' => !empty($error_message) ? $error_message : $error_codes[$error_code],
-            ));
-        }
-
-        die();
-
+    public function queryParam(string $key, mixed $default = null): mixed
+    {
+        return $_GET[$key] ?? $default;
     }
+}
 
-    public function outputBadRequest($error_message = ''){
+/* -----------------------------------------------------------
+ | Exceptions                                                 |
+ -----------------------------------------------------------*/
+class HttpException extends \RuntimeException { public function __construct(string $m,int $c){parent::__construct($m,$c);} }
+class BadRequestException extends HttpException { public function __construct(string $m){parent::__construct($m,400);} }
+class UnauthorizedException extends HttpException { public function __construct(string $m){parent::__construct($m,401);} }
+class ValidationException extends BadRequestException { public function __construct(public array $errors){parent::__construct('Validation failed');} }
+class NotFoundException extends HttpException { public function __construct(string $m){parent::__construct($m,404);} }
+class MethodNotAllowedException extends HttpException { public function __construct(string $m){parent::__construct($m,405);} }
 
-        /**
-         * Output bad request
-         */
-
-        $this->outputError(400, $error_message);
-
-    }
-
-    public function outputServerError($error_message = ''){
-
-        /**
-         * Output server error
-         */
-
-        $this->outputError(500, $error_message);
-
-    }
-
-    public function outputNotFound(){
-
-        /**
-         * Output not found
-         */
-
-        $this->outputError(404, 'Not Found');
-
-    }
-
-    public function get($url, $callback) {
-
-        /**
-         * Add GET route
-         */
-
-        $this->routes['get'][$url] = $callback;
-
-    }
-
-    public function post($url, $callback) {
-
-        /**
-         * Add POST route
-         */
-
-        $this->routes['post'][$url] = $callback;
-
-    }
-
-    public function put($url, $callback) {
-
-        /**
-         * Add PUT route
-         */
-
-        $this->routes['put'][$url] = $callback;
-
-    }
-
-    public function delete($url, $callback) {
-
-        /**
-         * Add DELETE route
-         */
-
-        $this->routes['delete'][$url] = $callback;
-
-    }
-
-    public function getRoutes() {
-
-        /**
-         * Get all routes
-         */
-
-        return $this->routes;
-
-    }
-
-    public function getRequestBodyData() {
-
-        /**
-         * Get request body data
-         */
-
-        if (!empty($this->requestBody)){
-            
-            $requestData = json_decode($this->requestBody, true);
-
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                $this->outputBadRequest('JSON decode error: ' . json_last_error_msg());
-            }
-
-        } else {
-            $requestData = array();
-        }
-
-        return $requestData;
-    }
-
-    public function getParam($param) {
-
-        /**
-         * Get request body param
-         */
-
-        $data = $this->getRequestBodyData();
-
-        if (isset($data[$param])){
-            return $data[$param];
-        } else {
-            return null;
-        }
-
-    }
-
-    public function getMatches() {
-
-        /**
-         * Return all route matches
-         */
-
-        array_shift($this->requestMatches);
-
-        return $this->requestMatches;
-
-    }
-
-    public function getFirstMatch() {
-
-        /**
-         * Return first route match
-         */
-
-        $matches = $this->getMatches();
-
-        if (count($matches) > 0){
-            return $matches[0];
-        } else {
-            $this->outputServerError('getFirstMatch: No match found');
-        }
-
-    }
-
-    public function autoIncludeRouteFile($bool = true) {
-
-        /**
-         * Auto include route file
-         */
-
-        $this->config['auto_include_route_file'] = $bool;
-
-    }
-
-    public function validateParams($validator) {
-
-        /**
-         * Validate request parameters
-         */
-
-        $errors = array();
-
-        $data = $this->getRequestBodyData();
-        
-        foreach ($validator as $param => $value) {
-            
-            if (!isset($data[$param]) && strpos($value, 'required') !== false) {
-                array_push($errors, $param . ' is required');
+/* -----------------------------------------------------------
+ | Validator                                                  |
+ -----------------------------------------------------------*/
+final class Validator
+{
+    public static function validate(array $data, array $rules): array
+    {
+        $errors = [];
+        foreach ($rules as $key => $ruleString) {
+            $rulesArr   = array_map('trim', explode('|', $ruleString));
+            $exists     = array_key_exists($key, $data);
+            if (in_array('required', $rulesArr, true) && !$exists) {
+                $errors[] = "$key is required";
                 continue;
             }
-
-            if (isset($data[$param])) {
-
-                if (strpos($value, 'int') !== false) {
-                    if (!is_int($data[$param])) {
-                        array_push($errors, $param . ' must be an integer');
-                    }
-                }
-
-                if (strpos($value, 'string') !== false) {
-                    if (!is_string($data[$param])) {
-                        array_push($errors, $param . ' must be a string');
-                    }
-                }
-
-                if (strpos($value, 'array') !== false) {
-                    if (!is_array($data[$param])) {
-                        array_push($errors, $param . ' must be an array');
-                    }
-                }
-
-                if (strpos($value, 'bool') !== false) {
-                    if (!is_bool($data[$param])) {
-                        array_push($errors, $param . ' must be a boolean');
-                    }
-                }
-
-                if (strpos($value, 'email') !== false) {
-                    if (!filter_var($data[$param], FILTER_VALIDATE_EMAIL)) {
-                        array_push($errors, $param . ' must be a valid email');
-                    }
-                }
-
-                if (strpos($value, 'url') !== false) {
-                    if (!filter_var($data[$param], FILTER_VALIDATE_URL)) {
-                        array_push($errors, $param . ' must be a valid url');
-                    }
-                }
-
-                if (strpos($value, 'ip') !== false) {
-                    if (!filter_var($data[$param], FILTER_VALIDATE_IP)) {
-                        array_push($errors, $param . ' must be a valid ip');
-                    }
-                }
-
-                if (strpos($value, 'datetime') !== false) {
-                    if (!filter_var($data[$param], FILTER_VALIDATE_REGEXP, array('options' => array('regexp' => '/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/')))) {
-                        array_push($errors, $param . ' must be a valid datetime');
-                    }
-                }
-
-                if (strpos($value, 'date') !== false) {
-                    if (!filter_var($data[$param], FILTER_VALIDATE_REGEXP, array('options' => array('regexp' => '/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/')))) {
-                        array_push($errors, $param . ' must be a valid date');
-                    }
-                }
-
-                if (strpos($value, 'time') !== false) {
-                    if (!filter_var($data[$param], FILTER_VALIDATE_REGEXP, array('options' => array('regexp' => '/^[0-9]{2}:[0-9]{2}:[0-9]{2}$/')))) {
-                        array_push($errors, $param . ' must be a valid time');
-                    }
-                }
-
+            if (!$exists) {
+                continue;
             }
-
+            $value = $data[$key];
+            foreach ($rulesArr as $rule) {
+                switch ($rule) {
+                    case 'int':       if (!filter_var($value, FILTER_VALIDATE_INT) && !is_int($value)) { $errors[] = "$key must be int";} break;
+                    case 'string':    if (!is_string($value))  { $errors[] = "$key must be string";} break;
+                    case 'bool':      if (!is_bool($value))   { $errors[] = "$key must be bool";} break;
+                    case 'email':     if (!filter_var($value, FILTER_VALIDATE_EMAIL)) { $errors[] = "$key invalid email";} break;
+                    case 'url':       if (!filter_var($value, FILTER_VALIDATE_URL))   { $errors[] = "$key invalid url";} break;
+                    case 'ip':        if (!filter_var($value, FILTER_VALIDATE_IP))    { $errors[] = "$key invalid ip";} break;
+                    case 'date':      if (!self::dt($value,'Y-m-d'))                 { $errors[] = "$key invalid date";} break;
+                    case 'time':      if (!self::dt($value,'H:i:s'))                 { $errors[] = "$key invalid time";} break;
+                    case 'datetime':  if (!self::dt($value,'Y-m-d H:i:s'))           { $errors[] = "$key invalid datetime";} break;
+                }
+            }
         }
-
         return $errors;
+    }
+    private static function dt(string $v, string $fmt): bool
+    {
+        $d = DateTimeImmutable::createFromFormat($fmt, $v);
+        return $d !== false && $d->format($fmt) === $v;
+    }
+}
 
+/* -----------------------------------------------------------
+ | JWT helper                                                 |
+ -----------------------------------------------------------*/
+final class Jwt
+{
+    private static function encode(string $data): string
+    {
+        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+    }
+    private static function decode(string $data): string
+    {
+        return base64_decode(strtr($data, '-_', '+/'));
     }
 
-    public function generateJWT($payload, $jwt_secret_key) {
-
-        /**
-         * Generate JWT token
-         */
-
-        $header = $this->base64url_encode(json_encode(array('alg' => 'HS256', 'typ' => 'JWT')));
-        $payload = $this->base64url_encode(json_encode($payload));
-        $signature = $this->base64url_encode(hash_hmac('sha256', $header . '.' . $payload, $jwt_secret_key, true));
-        
-        $jwt = $header . '.' . $payload . '.' . $signature;
-
-        return $jwt;
-
+    public static function generate(array $payload, string $secret): string
+    {
+        $header  = self::encode(json_encode(['alg' => 'HS256','typ' => 'JWT'], JSON_THROW_ON_ERROR));
+        $body    = self::encode(json_encode($payload, JSON_THROW_ON_ERROR));
+        $sign    = self::encode(hash_hmac('sha256', "$header.$body", $secret, true));
+        return "$header.$body.$sign";
     }
 
-    public function validateJWT($jwt) {
-
-        /**
-         * Validate JWT token
-         */
-
-        $tokenParts = explode('.', $jwt);
-        $header = base64_decode($tokenParts[0]);
-        $payload = base64_decode($tokenParts[1]);
-        $signature_provided = $tokenParts[2];
-
-        $expiration = json_decode($payload)->exp;
-        $is_token_expired = ($expiration - time()) < 0;
-
-        $base64_url_header = $this->base64url_encode($header);
-        $base64_url_payload = $this->base64url_encode($payload);
-        $signature = hash_hmac('SHA256', $base64_url_header . "." . $base64_url_payload, $jwt_secret_key, true);
-        $base64_url_signature = $this->base64url_encode($signature);
-
-        $is_signature_valid = ($base64_url_signature === $signature_provided);
-        
-        if ($is_token_expired || !$is_signature_valid) {
-            return FALSE;
-        } else {
-            return TRUE;
+    public static function validate(string $jwt, string $secret): bool
+    {
+        $parts = explode('.', $jwt, 3);
+        if (count($parts) !== 3) {
+            return false;
         }
+        [$header64, $body64, $signature64] = $parts;
+        $header = json_decode(self::decode($header64), true, 512, JSON_THROW_ON_ERROR);
+        if (($header['alg'] ?? '') !== 'HS256') {
+            return false;
+        }
+        $expected = self::encode(hash_hmac('sha256', "$header64.$body64", $secret, true));
+        if (!hash_equals($expected, $signature64)) {
+            return false;
+        }
+        $claims = json_decode(self::decode($body64), true, 512, JSON_THROW_ON_ERROR);
+        return !isset($claims['exp']) || $claims['exp'] >= time();
+    }
+}
+
+/* -----------------------------------------------------------
+ | Middleware & Route                                         |
+ -----------------------------------------------------------*/
+interface MiddlewareInterface
+{
+    public function __invoke(Request $request, array $params, callable $next);
+}
+
+final class Route
+{
+    private array $middleware = [];
+
+    public function __construct(
+        public readonly string $method,
+        public readonly string $pattern,
+        public readonly \Closure $handler  // <- cambia qui
+    ) {}
+
+    public function middleware(callable|string ...$mw): self
+    {
+        $this->middleware = [...$this->middleware, ...$mw];
+        return $this;
     }
 
-    public function parseRequest() {
+    public function getMiddleware(): array
+    {
+        return $this->middleware;
+    }
+}
 
-        /**
-         * Parse request
-         */
-        
-        $this->requestMethod = strtolower($_SERVER['REQUEST_METHOD']);
+/*------------------------------------------------------------
+ | Attribute for controller methods                          |
+ -----------------------------------------------------------*/
+#[Attribute(Attribute::TARGET_METHOD | Attribute::IS_REPEATABLE)]
+class RouteAttr
+{
+    public function __construct(
+        public readonly string $method,
+        public readonly string $path
+    ) {}
+}
 
-        if (!isset($_GET['u'])) {
-            $this->outputBadRequest('mod_rewrite rule not configured');
-        }
-        
-        $this->requestURI = trim($_GET['u'], '/');
+/* -----------------------------------------------------------
+ | Router                                                     |
+ -----------------------------------------------------------*/
+final class Router
+{
+    /** @var array<string,list<Route>> */
+    private array $routes = [
+        'get' => [], 'post' => [], 'put' => [], 'patch' => [],
+        'delete' => [], 'head' => [], 'options' => []
+    ];
 
-        /* 
-            Enumerate routes
-        */
-
-        foreach($this->routes[$this->requestMethod] as $uri => $callback) {
-            
-            if (preg_match('/^' . str_replace('/','\/',$uri) . '$/', $this->requestURI, $matches)) {
-                
-                $this->processedRoute = $this->routes[$this->requestMethod][$uri];
-                $this->requestMatches = $matches;
-                break;
+    public function getDebugRoutes(): array
+    {
+        $out = [];
+        foreach ($this->routes as $method => $routes) {
+            foreach ($routes as $route) {
+                $out[] = strtoupper($method) . ' ' . $route->pattern;
             }
         }
-        
-        /* 
-            Check if route exists
-        */
-        
-        if (empty($this->processedRoute)) {
-            $this->outputNotFound('Requested route was not found');
-        }
+        return $out;
+    }
 
-        /*
-            Auto include route file if exists
-        */
+    public function add(string $method, string $pattern, callable $handler): Route
+    {
+        $m = strtolower($method);
+        $route = new Route($m, $pattern, $handler);
+        $this->routes[$m][] = $route;
+        return $route;
+    }
 
-        $parts = explode('/', $this->requestURI);
-
-        if (sizeof($parts) > 0) {
-            $this->endpoint = $parts[0];
-
-            if ($this->config['auto_include_route_file']){
-                if (file_exists(dirname($_SERVER['SCRIPT_FILENAME']).'/routes/route.' . $this->endpoint . '.php')){
-                    require_once 'routes/route.' . $this->endpoint . '.php';
-                }
-            }
-
-        } else {
-
-            $this->endpoint = '';
-
-        }
-
-
-        /*
-            Callback processor
-        */
-
-        if (!is_callable($this->processedRoute)) {
-            if (!function_exists($this->processedRoute)) {
-                $this->outputServerError('Callback not defined');
+    /**
+     * Match request to a Route and extract params
+     * @return array{0:Route,1:array<string,string>}
+     */
+    public function match(string $method, string $uri): array
+    {
+        $m = $method === 'head' ? 'get' : strtolower($method);
+        foreach ($this->routes[$m] ?? [] as $route) {
+            $regex = '#^' . preg_replace_callback(
+                '/\\{([\w]+)(?::([^}]+))?\\}/',
+                static fn($m) => '(?P<' . $m[1] . '>' . ($m[2] ?? '[^/]+') . ')',
+                $route->pattern
+            ) . '$#';
+            if (preg_match($regex, $uri, $matches)) {
+                $params = array_filter($matches, 'is_string', ARRAY_FILTER_USE_KEY);
+                return [$route, $params];
             }
         }
+        throw new NotFoundException('Route not found: ' . $uri);
+    }
+}
 
-        $this->requestBody = file_get_contents('php://input');
-        $this->response = call_user_func($this->processedRoute, $this);
-        
-        if ($error = error_get_last()) {
+/* -----------------------------------------------------------
+ | ErrorHandler                                               |
+ -----------------------------------------------------------*/
+final class ErrorHandler
+{
+    public function __construct(private readonly Config $cfg)
+    {
+        set_exception_handler([$this, 'handle']);
+    }
 
-            // If an error was sent, don't output anything
-           
-            list($type, $level) = $this->mapErrorCode($error['type']);
-            
-            if ($this->config['return_server_errors'] && $level <= $this->config['return_server_error_level']) {
+    public function handle(Throwable $t): never
+    {
+        $code = $t instanceof HttpException ? $t->getCode() : 500;
+        $body = ['error' => $t->getMessage(), 'code' => $code];
+        if ($t instanceof ValidationException) {
+            $body['validation'] = $t->errors;
+        }
+        if ($this->cfg->displayErrors && $code === 500) {
+            $body['trace'] = $t->getTrace();
+        }
+        (new Response($code, body: $body))
+            ->withHeaders($this->corsHeaders())
+            ->send();
+        exit;
+    }
+
+    public function corsHeaders(): array
+    {
+        if (!$this->cfg->enableCors) {
+            return [];
+        }
+        $originHeader = $_SERVER['HTTP_ORIGIN'] ?? '';
+        $origin = '';
+        if (in_array('*', $this->cfg->corsOrigins, true)) {
+            $origin = '*';
+        } elseif ($originHeader !== '' && in_array($originHeader, $this->cfg->corsOrigins, true)) {
+            $origin = $originHeader;
+        }
+        $hdr = [
+            'Access-Control-Allow-Methods'     => implode(',', $this->cfg->corsMethods),
+            'Access-Control-Allow-Headers'     => implode(',', $this->cfg->corsHeaders),
+            'Access-Control-Allow-Credentials' => $this->cfg->corsAllowCredentials ? 'true' : 'false',
+        ];
+        if ($origin !== '') {
+            $hdr['Access-Control-Allow-Origin'] = $origin;
+        }
+        return $hdr;
+    }
+}
+
+/* -----------------------------------------------------------
+ | Public Facade                                              |
+ -----------------------------------------------------------*/
+final class RestApi
+{
+    private Router  $router;
+    private Request $request;
+    private Config  $cfg;
+
+    public function __construct(Config|array|null $config = null)
+    {
+        $this->cfg     = $config instanceof Config ? $config : new Config(...($config ?? []));
+        $this->router  = new Router();
+        $this->request = new Request();
+        new ErrorHandler($this->cfg);
+    }
+
+    /* Shortcut methods */
+    public function get(string $pattern, callable $handler): Route    { return $this->router->add('GET',    $pattern, $handler); }
+    public function post(string $pattern, callable $handler): Route   { return $this->router->add('POST',   $pattern, $handler); }
+    public function put(string $pattern, callable $handler): Route    { return $this->router->add('PUT',    $pattern, $handler); }
+    public function patch(string $pattern, callable $handler): Route  { return $this->router->add('PATCH',  $pattern, $handler); }
+    public function delete(string $pattern, callable $handler): Route { return $this->router->add('DELETE', $pattern, $handler); }
+    public function head(string $pattern, callable $handler): Route   { return $this->router->add('HEAD',   $pattern, $handler); }
+    public function options(string $pattern, callable $handler): Route{ return $this->router->add('OPTIONS',$pattern,$handler); }
+
+    public function debugRoutes(): array
+    {
+        return $this->router->getDebugRoutes();
+    }
+
+    public function run(): void
+    {
+        // automatic CORS preflight if no route defined in OPTIONS
+        if ($this->request->method === 'options') {
+            try {
+                $this->router->match('OPTIONS', $this->request->uri);
+            } catch (NotFoundException) {
+                (new Response(204))
+                    ->withHeaders($this->corsHeaders())
+                    ->send();
                 return;
             }
         }
 
-        $this->outputData($this->response);
+        [$route, $params] = $this->router->match($this->request->method, $this->request->uri);
 
+        // build middleware pipeline
+        $handler = function(Request $req, array $p) use ($route) {
+            return ($route->handler)($req, $p);
+        };
+        foreach (array_reverse($route->getMiddleware()) as $mw) {
+            $next = $handler;
+            $handler = is_string($mw)
+                ? fn($req, $p) => (new $mw())($req, $p, $next)
+                : fn($req, $p) => $mw($req, $p, $next);
+        }
+
+        $response = $handler($this->request, $params);
+        if (!$response instanceof Response) {
+            $response = new Response(body: $response);
+        }
+
+        $response
+            ->withHeaders($this->corsHeaders())
+            ->send();
     }
 
+    private function corsHeaders(): array
+    {
+        // reuse ErrorHandler logic
+        return (new ErrorHandler($this->cfg))
+            ->{/**/ 'corsHeaders'}();
+    }
+
+    /**
+     * Optional: auto-register controllers via #[Route]
+     */
+    public function registerControllers(string $namespace, string $path): void
+    {
+        foreach (glob($path . '/*.php') as $file) {
+            require_once $file;
+            $class = $namespace . '\\' . basename($file, '.php');
+            if (!class_exists($class)) continue;
+            $ref = new ReflectionClass($class);
+            foreach ($ref->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                foreach ($method->getAttributes(RouteAttr::class) as $attr) {
+                    /** @var RouteAttr $ra */
+                    $ra = $attr->newInstance();
+                    $this->router->add($ra->method, $ra->path, [$class, $method->getName()]);
+                }
+            }
+        }
+    }
 }
 
 ?>
