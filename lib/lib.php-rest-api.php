@@ -27,8 +27,6 @@
  * @link        https://github.com/arcaweb-ch/php-rest-api
  */
 
-<?php
-
 declare(strict_types=1);
 
 namespace App;
@@ -109,8 +107,24 @@ final class Request
     public function __construct()
     {
         $this->method  = strtolower($_SERVER['REQUEST_METHOD'] ?? 'get');
-        $this->uri = trim((string)($_GET['u'] ?? ''), '/');
+        $this->uri = trim($this->parseUri(), '/');
         $this->rawBody = file_get_contents('php://input');
+    }
+
+    private function parseUri(): string
+    {
+        // Migliore parsing dell'URI per evitare problemi con query parameters
+        $uri = $_GET['u'] ?? '';
+        if (empty($uri)) {
+            $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+            $scriptName = dirname($_SERVER['SCRIPT_NAME']);
+            if ($scriptName !== '/') {
+                $requestUri = substr($requestUri, strlen($scriptName));
+            }
+            $uri = parse_url($requestUri, PHP_URL_PATH) ?? '';
+            $uri = ltrim($uri, '/');
+        }
+        return $uri;
     }
 
     public function json(): array
@@ -153,6 +167,7 @@ final class Request
 class HttpException extends \RuntimeException { public function __construct(string $m,int $c){parent::__construct($m,$c);} }
 class BadRequestException extends HttpException { public function __construct(string $m){parent::__construct($m,400);} }
 class UnauthorizedException extends HttpException { public function __construct(string $m){parent::__construct($m,401);} }
+class ForbiddenException extends HttpException { public function __construct(string $m){parent::__construct($m,403);} }
 class ValidationException extends BadRequestException { public function __construct(public array $errors){parent::__construct('Validation failed');} }
 class NotFoundException extends HttpException { public function __construct(string $m){parent::__construct($m,404);} }
 class MethodNotAllowedException extends HttpException { public function __construct(string $m){parent::__construct($m,405);} }
@@ -166,8 +181,9 @@ final class Validator
     {
         $errors = [];
         foreach ($rules as $key => $ruleString) {
-            $rulesArr   = array_map('trim', explode('|', $ruleString));
-            $exists     = array_key_exists($key, $data);
+            $rulesArr = array_map('trim', explode('|', $ruleString));
+            $exists   = array_key_exists($key, $data);
+
             if (in_array('required', $rulesArr, true) && !$exists) {
                 $errors[] = "$key is required";
                 continue;
@@ -175,23 +191,93 @@ final class Validator
             if (!$exists) {
                 continue;
             }
+
             $value = $data[$key];
             foreach ($rulesArr as $rule) {
-                switch ($rule) {
-                    case 'int':       if (!filter_var($value, FILTER_VALIDATE_INT) && !is_int($value)) { $errors[] = "$key must be int";} break;
-                    case 'string':    if (!is_string($value))  { $errors[] = "$key must be string";} break;
-                    case 'bool':      if (!is_bool($value))   { $errors[] = "$key must be bool";} break;
-                    case 'email':     if (!filter_var($value, FILTER_VALIDATE_EMAIL)) { $errors[] = "$key invalid email";} break;
-                    case 'url':       if (!filter_var($value, FILTER_VALIDATE_URL))   { $errors[] = "$key invalid url";} break;
-                    case 'ip':        if (!filter_var($value, FILTER_VALIDATE_IP))    { $errors[] = "$key invalid ip";} break;
-                    case 'date':      if (!self::dt($value,'Y-m-d'))                 { $errors[] = "$key invalid date";} break;
-                    case 'time':      if (!self::dt($value,'H:i:s'))                 { $errors[] = "$key invalid time";} break;
-                    case 'datetime':  if (!self::dt($value,'Y-m-d H:i:s'))           { $errors[] = "$key invalid datetime";} break;
+                // split rule name and parameter (e.g. min:8)
+                [$name, $param] = array_pad(explode(':', $rule, 2), 2, null);
+
+                switch ($name) {
+                    case 'int':
+                        if (!filter_var($value, FILTER_VALIDATE_INT) && !is_int($value)) {
+                            $errors[] = "$key must be int";
+                        }
+                        break;
+                    case 'string':
+                        if (!is_string($value)) {
+                            $errors[] = "$key must be string";
+                        }
+                        break;
+                    case 'bool':
+                        if (!is_bool($value)) {
+                            $errors[] = "$key must be bool";
+                        }
+                        break;
+                    case 'email':
+                        if (!filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                            $errors[] = "$key invalid email";
+                        }
+                        break;
+                    case 'url':
+                        if (!filter_var($value, FILTER_VALIDATE_URL)) {
+                            $errors[] = "$key invalid url";
+                        }
+                        break;
+                    case 'ip':
+                        if (!filter_var($value, FILTER_VALIDATE_IP)) {
+                            $errors[] = "$key invalid ip";
+                        }
+                        break;
+                    case 'array':
+                        if (!is_array($value)) {
+                            $errors[] = "$key must be array";
+                        }
+                        break;
+                    case 'json':
+                        if (
+                            !is_string($value)
+                            || !json_decode($value, true, 512, JSON_THROW_ON_ERROR)
+                        ) {
+                            $errors[] = "$key invalid json";
+                        }
+                        break;
+                    case 'date':
+                        if (!self::dt((string)$value, 'Y-m-d')) {
+                            $errors[] = "$key invalid date";
+                        }
+                        break;
+                    case 'time':
+                        if (!self::dt((string)$value, 'H:i:s')) {
+                            $errors[] = "$key invalid time";
+                        }
+                        break;
+                    case 'datetime':
+                        if (!self::dt((string)$value, 'Y-m-d H:i:s')) {
+                            $errors[] = "$key invalid datetime";
+                        }
+                        break;
+                    case 'min':
+                        $min = (int)$param;
+                        if (is_string($value) && mb_strlen($value) < $min) {
+                            $errors[] = "$key minimum length is $min";
+                        } elseif (is_array($value) && count($value) < $min) {
+                            $errors[] = "$key minimum items is $min";
+                        }
+                        break;
+                    case 'max':
+                        $max = (int)$param;
+                        if (is_string($value) && mb_strlen($value) > $max) {
+                            $errors[] = "$key maximum length is $max";
+                        } elseif (is_array($value) && count($value) > $max) {
+                            $errors[] = "$key maximum items is $max";
+                        }
+                        break;
                 }
             }
         }
         return $errors;
     }
+
     private static function dt(string $v, string $fmt): bool
     {
         $d = DateTimeImmutable::createFromFormat($fmt, $v);
@@ -256,7 +342,7 @@ final class Route
     public function __construct(
         public readonly string $method,
         public readonly string $pattern,
-        public readonly \Closure $handler  // <- cambia qui
+        public readonly \Closure $handler  // <- torna a \Closure
     ) {}
 
     public function middleware(callable|string ...$mw): self
@@ -308,7 +394,9 @@ final class Router
     public function add(string $method, string $pattern, callable $handler): Route
     {
         $m = strtolower($method);
-        $route = new Route($m, $pattern, $handler);
+        // Converti callable in Closure se necessario
+        $closureHandler = $handler instanceof \Closure ? $handler : \Closure::fromCallable($handler);
+        $route = new Route($m, $pattern, $closureHandler);
         $this->routes[$m][] = $route;
         return $route;
     }
@@ -343,10 +431,28 @@ final class ErrorHandler
     public function __construct(private readonly Config $cfg)
     {
         set_exception_handler([$this, 'handle']);
+        set_error_handler([$this, 'handleError']);
+    }
+
+    public function handleError(int $severity, string $message, string $file = '', int $line = 0): bool
+    {
+        // Converti gli errori PHP in eccezioni per gestirli in modo uniforme
+        if (error_reporting() & $severity) {
+            throw new \ErrorException($message, 0, $severity, $file, $line);
+        }
+        return false;
     }
 
     public function handle(Throwable $t): never
     {
+        // Pulisci qualsiasi output precedente
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        
+        // Assicurati che l'header Content-Type sia JSON
+        header('Content-Type: application/json; charset=utf-8');
+        
         $code = $t instanceof HttpException ? $t->getCode() : 500;
         $body = ['error' => $t->getMessage(), 'code' => $code];
         if ($t instanceof ValidationException) {
@@ -354,6 +460,8 @@ final class ErrorHandler
         }
         if ($this->cfg->displayErrors && $code === 500) {
             $body['trace'] = $t->getTrace();
+            $body['file'] = $t->getFile();
+            $body['line'] = $t->getLine();
         }
         (new Response($code, body: $body))
             ->withHeaders($this->corsHeaders())
@@ -418,19 +526,26 @@ final class RestApi
 
     public function run(): void
     {
-        // automatic CORS preflight if no route defined in OPTIONS
+        // Improved CORS preflight handling
         if ($this->request->method === 'options') {
             try {
                 $this->router->match('OPTIONS', $this->request->uri);
             } catch (NotFoundException) {
-                (new Response(204))
-                    ->withHeaders($this->corsHeaders())
-                    ->send();
+                // Always send CORS headers for preflight, even if route not found
+                $headers = $this->corsHeaders();
+                $headers['Access-Control-Max-Age'] = '86400'; // Cache preflight for 24h
+                (new Response(200, $headers))->send();
                 return;
             }
         }
 
-        [$route, $params] = $this->router->match($this->request->method, $this->request->uri);
+        try {
+            [$route, $params] = $this->router->match($this->request->method, $this->request->uri);
+        } catch (NotFoundException $e) {
+            // Ensure CORS headers are sent even for 404s
+            (new Response(404, $this->corsHeaders(), ['error' => $e->getMessage(), 'code' => 404]))->send();
+            return;
+        }
 
         // build middleware pipeline
         $handler = function(Request $req, array $p) use ($route) {
@@ -443,9 +558,14 @@ final class RestApi
                 : fn($req, $p) => $mw($req, $p, $next);
         }
 
-        $response = $handler($this->request, $params);
-        if (!$response instanceof Response) {
-            $response = new Response(body: $response);
+        try {
+            $response = $handler($this->request, $params);
+            if (!$response instanceof Response) {
+                $response = new Response(body: $response);
+            }
+        } catch (Throwable $e) {
+            // Let ErrorHandler manage exceptions, but ensure it has access to CORS headers
+            throw $e;
         }
 
         $response
