@@ -62,6 +62,7 @@ final class Response
         'X-Content-Type-Options' => 'nosniff',
         'Referrer-Policy'        => 'same-origin',
         'X-Frame-Options'        => 'DENY',
+        'Content-Type'           => 'application/json; charset=utf-8', // aggiunto
     ];
 
     public function __construct(
